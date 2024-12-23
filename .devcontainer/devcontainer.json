@@ -1,0 +1,26 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "containerEnv" : { "CHOKIDAR_USEPOLLING" : "true" },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "shutdownAction": "stopCompose",
+    "vscode": {
+      "settings": { "terminal.integrated.shell.linux": "/bin/bash", "files.autoSave": "onFocusChange" },
+      "extensions": [
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  },
+  "mounts": [
+    "target=/workspace/node_modules,type=volume",
+    "target=/workspace/.next,type=volume"
+]
+,
+  "forwardPorts": [
+    3000
+  ]
+}
