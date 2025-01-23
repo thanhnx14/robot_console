@@ -28,4 +28,4 @@ jobs:
 
     - name: Run Docker Container
       run: |
-        docker run -d --name robot_console --restart always -p 8080:8081 robot_console_dev_image:latest
+        docker run -d --name robot_console --restart always -p 9080:8081 robot_console_dev_image:latest
