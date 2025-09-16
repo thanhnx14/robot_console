@@ -20,11 +20,15 @@ jobs:
         docker build . --file Dockerfile --tag robot_console_dev_image:latest
     - name: Stop and Remove Old Container
       run: |
-        if (docker ps -q --filter "name=robot_console") {
-            docker stop robot_console
-            docker rm robot_console
+        # Find the container ID (running or stopped)
+        $containerId = docker ps -aq --filter "name=robot_console"
+
+        # Check if the variable is not empty
+        if ($containerId) {
+          Write-Output "Container 'robot_console' found. Stopping and removing it."
+          docker rm --force $containerId
         } else {
-            Write-Output "No container to remove"
+          Write-Output "Container 'robot_console' not found. Nothing to do."
         }
 
     - name: Run Docker Container
