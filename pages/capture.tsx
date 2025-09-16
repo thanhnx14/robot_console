@@ -9,7 +9,7 @@ const Capture: React.FC = () => {
   const [fps, setFps] = useState(0);
 
   const FPS = 20; // Configure the FPS (frames per second)
-  const FRAME_INTERVAL = 1000 / FPS; // Calculate the interval in milliseconds
+  // const FRAME_INTERVAL = 1000 / FPS; // Calculate the interval in milliseconds
 
   useEffect(() => {
     const originalConsoleError = console.error;

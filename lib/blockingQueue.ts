@@ -45,7 +45,7 @@ class BlockingQueue<T> {
     while (this.waiting.length > 0 && this.queue.length > 0) {
       
       const item = this.queue.shift() || null;
-      this.waiting.forEach((waiter, index , obj) => {
+      this.waiting.forEach((waiter, _index , _obj) => {
         if (waiter) {
           // console.log('Resolving a waiting promise');
           waiter(item);
