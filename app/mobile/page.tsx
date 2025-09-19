@@ -12,7 +12,7 @@ const MessageType = {
 
 // Cấu hình cho stream
 const FPS = 15; // Gửi 15 khung hình mỗi giây
-const IMAGE_QUALITY = 0.7; // Chất lượng ảnh JPEG (0.0 - 1.0)
+const IMAGE_QUALITY = 0.1; // Chất lượng ảnh JPEG (0.0 - 1.0)
 
 export default function MobilePage() {
     const [isConnected, setIsConnected] = useState<boolean>(false);
