@@ -43,10 +43,11 @@ export default function MobilePage() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animationFrameId = useRef<number>(0);
     const frameIdRef = useRef<number>(0);
+    const lastFrameTimeRef = useRef<number>(0);
+    const frameInterval = 1000 / FPS;
 
     // 2. HELPER FUNCTION ĐỂ GỬI LỆNH JSON
     const sendCommand = useCallback((channel: string, command: string, payload: any = {}) => {
-        console.log(ws.current?.readyState)
         if (ws.current?.readyState !== WebSocket.OPEN) return;
 
         const message = { channel, command, payload };
@@ -173,7 +174,18 @@ export default function MobilePage() {
 
     const streamLoop = useCallback((currentTime: number) => {
         animationFrameId.current = requestAnimationFrame(streamLoop);
-        // ... logic FPS throttling (giữ nguyên)
+        // Tính toán thời gian đã trôi qua kể từ frame cuối
+        const deltaTime = currentTime - lastFrameTimeRef.current;
+
+        // Nếu chưa đủ thời gian, bỏ qua và chờ frame kế tiếp
+        if (deltaTime < frameInterval) {
+            return;
+        }
+
+        // Đã đủ thời gian, cập nhật lại thời gian của frame cuối
+        // Phép chia lấy dư giúp tránh lỗi cộng dồn thời gian (drift)
+        lastFrameTimeRef.current = currentTime - (deltaTime % frameInterval);
+
         sendFrame();
     }, [sendFrame]);
 
