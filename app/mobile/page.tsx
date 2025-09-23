@@ -3,15 +3,29 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+type Detection = {
+    box: {
+        pixel: {
+            x1: number;
+            y1: number;
+            x2: number;
+            y2: number;
+        };
+    };
+    confidence: number;
+    class_id: number;
+    class_name: string;
+};
+
 // 1. CẬP NHẬT MESSAGE TYPE CHO GIAO THỨC "LAI"
 const MessageType = {
-    JSON_COMMAND: 0x01,
-    IMAGE_FRAME: 0x02,
+    JSON_COMMAND: 0x03,
+    IMAGE_FRAME: 0x01,
 };
 
 // Cấu hình cho stream
-const FPS = 15;
-const IMAGE_QUALITY = 0.1;
+const FPS = 24;
+const IMAGE_QUALITY = 0.7;
 
 // --- Helper function để chuyển đổi Hex sang URL ảnh ---
 const hexToImageUrl = (hexString: string): string => {
@@ -45,7 +59,55 @@ export default function MobilePage() {
     const frameIdRef = useRef<number>(0);
     const lastFrameTimeRef = useRef<number>(0);
     const frameInterval = 1000 / FPS;
+    const isProcessingFrame = useRef<boolean>(false);
 
+    // === START: THÊM CODE ĐO FPS ===
+    const [streamingFps, setStreamingFps] = useState(0);
+    const [receivingFps, setReceivingFps] = useState(0);
+    const sentFrameCount = useRef(0);
+    const receivedFrameCount = useRef(0);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setStreamingFps(sentFrameCount.current);
+            setReceivingFps(receivedFrameCount.current);
+            sentFrameCount.current = 0;
+            receivedFrameCount.current = 0;
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, []);
+    // === END: THÊM CODE ĐO FPS ===
+    const drawSingleDetection = (ctx: CanvasRenderingContext2D, detection: Detection) => {
+        // Sử dụng tọa độ pixel trực tiếp từ server
+        const { x1, y1, x2, y2 } = detection.box.pixel;
+        const width = x2 - x1;
+        const height = y2 - y1;
+        
+        // 1. Vẽ hộp (bounding box)
+        ctx.strokeStyle = 'lime'; // Màu xanh lá
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.rect(x1, y1, width, height);
+        ctx.stroke();
+
+        // 2. Vẽ nhãn (class_name và confidence)
+        const label = `${detection.class_name} (${Math.round(detection.confidence * 100)}%)`;
+        ctx.fillStyle = 'lime';
+        ctx.font = '16px Arial';
+        ctx.textBaseline = 'bottom'; // Canh chữ ở phía dưới
+
+        // Lấy kích thước của text để vẽ nền
+        const textMetrics = ctx.measureText(label);
+        const textHeight = 20;
+        
+        // Vẽ nền cho text
+        ctx.fillRect(x1, y1 - textHeight, textMetrics.width + 4, textHeight);
+
+        // Viết chữ lên trên nền
+        ctx.fillStyle = 'black';
+        ctx.fillText(label, x1 + 2, y1);
+    }
     // 2. HELPER FUNCTION ĐỂ GỬI LỆNH JSON
     const sendCommand = useCallback((channel: string, command: string, payload: any = {}) => {
         if (ws.current?.readyState !== WebSocket.OPEN) return;
@@ -96,8 +158,8 @@ export default function MobilePage() {
             // Log event ra để có thêm chi tiết nếu có thể
             console.error("WebSocket error:", event);
         };
-
-        socket.onmessage = (event) => {
+        
+        socket.onmessage = async  (event) => {
             const data = event.data as ArrayBuffer;
             if (data.byteLength < 1) return;
 
@@ -107,21 +169,44 @@ export default function MobilePage() {
             if (msgType === MessageType.JSON_COMMAND) {
                 const jsonString = new TextDecoder().decode(data.slice(1));
                 const message = JSON.parse(jsonString);
+                if (message.image) {
+                    console.log("frame id:" + message.frameId);
+                    receivedFrameCount.current++;
+ 
+                    // Lấy canvas và context để vẽ
+                    const canvas = canvasRef.current;
+                    if (!canvas) return;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) return;
 
-                if (message.image && message.ai) {
-                    const imageUrl = hexToImageUrl(message.image);
+                    // Chuyển đổi hex -> blob
+                    const bytes = new Uint8Array(message.image.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16)));
+                    const blob = new Blob([bytes], { type: 'image/jpeg' });
 
-                    setLatestReceivedFrame(prevFrame => {
-                        if (prevFrame) URL.revokeObjectURL(prevFrame);
-                        return imageUrl;
-                    });
-                    setLatestAiResult(message.ai);
+                    // Tạo ImageBitmap để giải mã ảnh hiệu quả
+                    const imageBitmap = await createImageBitmap(blob);
 
+                     // Đảm bảo canvas có kích thước bằng với ảnh
+                    canvas.width = imageBitmap.width;
+                    canvas.height = imageBitmap.height;
+
+                    // Vẽ ảnh lên canvas
+                    ctx.drawImage(imageBitmap, 0, 0);
+                    // Giải phóng bộ nhớ
+                    imageBitmap.close();
+
+                    if (message.ai && message.ai.detections && Array.isArray(message.ai.detections)) {
+                         message.ai.detections.forEach((detection: Detection) => {
+                            drawSingleDetection(ctx, detection);
+                         });
+                        // setLatestAiResult(message.ai);
+                    }
                     // Sử dụng state isReceiving từ closure để kiểm tra
                     // Điều này tránh đưa isReceiving vào dependency array
                     if (isReceivingRef.current) { // Cần thêm một ref cho isReceiving
                         requestNextPackage();
                     }
+                    console.log("end" + message.frameId);
                 } else {
                     setMessages(prev => [...prev, jsonString]);
                 }
@@ -144,20 +229,31 @@ export default function MobilePage() {
     }, [isReceiving]);
 
     // --- LOGIC GỬI ẢNH (STREAMER) ---
-    const sendFrame = useCallback(() => {
-        if (!videoRef.current || !canvasRef.current || ws.current?.readyState !== WebSocket.OPEN) return;
+    const sendFrame = useCallback(async () => {
+        if (!videoRef.current || !canvasRef.current || ws.current?.readyState !== WebSocket.OPEN){
+            isProcessingFrame.current = false;
+            return;
+        }
 
+        
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const context = canvas.getContext('2d');
+        
+        const imageBitmap = await createImageBitmap(video);
         if (!context) return;
 
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        context.drawImage(imageBitmap, 0, 0, canvas.width, canvas.height);
+        imageBitmap.close();
+
 
         canvas.toBlob(async (blob) => {
-            if (!blob) return;
+            if (!blob || ws.current?.readyState !== WebSocket.OPEN) {
+                isProcessingFrame.current = false;
+                return;
+            }
             const imageBuffer = await blob.arrayBuffer();
 
             // Đóng gói header: 1 byte type + 4 byte frame_id
@@ -169,11 +265,32 @@ export default function MobilePage() {
 
             const messageToSend = new Blob([header, imageBuffer]);
             ws.current?.send(messageToSend);
+            // === START: CẬP NHẬT BỘ ĐẾM FPS KHI GỬI ===
+            sentFrameCount.current++;
+            
+            isProcessingFrame.current = false;
+            // console.log(frameIdRef.current +":"+ getCurentTime())
+            // === END: CẬP NHẬT BỘ ĐẾM FPS KHI GỬI ===
         }, 'image/jpeg', IMAGE_QUALITY);
     }, []);
 
+    const getCurentTime = () => {
+        const now = new Date();
+
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+
+            return `${hours}:${minutes}:${seconds}.${milliseconds}`;
+    }
+
     const streamLoop = useCallback((currentTime: number) => {
         animationFrameId.current = requestAnimationFrame(streamLoop);
+
+        if (isProcessingFrame.current) {
+            return;
+        }
         // Tính toán thời gian đã trôi qua kể từ frame cuối
         const deltaTime = currentTime - lastFrameTimeRef.current;
 
@@ -185,22 +302,34 @@ export default function MobilePage() {
         // Đã đủ thời gian, cập nhật lại thời gian của frame cuối
         // Phép chia lấy dư giúp tránh lỗi cộng dồn thời gian (drift)
         lastFrameTimeRef.current = currentTime - (deltaTime % frameInterval);
+        isProcessingFrame.current = true;
 
         sendFrame();
-    }, [sendFrame]);
+    }, [sendFrame, frameInterval]);
 
     // --- CÁC HÀM ĐIỀU KHIỂN ---
     const handleStartStream = async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { 
+                frameRate:15,
+                width: { max: 640 },
+                height: { max: 640 }
+                
+            } });
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 videoRef.current.play();
+            
+                videoRef.current.oncanplay = () => {
+                    // Đặt mốc thời gian ban đầu ở đây để tính toán deltaTime cho chính xác
+                    lastFrameTimeRef.current = performance.now(); 
+
+                    // Gửi lệnh và bắt đầu vòng lặp stream TỪ BÊN TRONG NÀY
+                    sendCommand("streamer", "START_STREAM");
+                    setIsStreaming(true);
+                    animationFrameId.current = requestAnimationFrame(streamLoop);
+                };
             }
-            // 5. GỬI LỆNH ĐẾN FSM CỦA SERVER
-            sendCommand("streamer", "START_STREAM");
-            setIsStreaming(true);
-            animationFrameId.current = requestAnimationFrame(streamLoop);
         } catch (err) {
             console.error("Lỗi truy cập camera:", err);
         }
@@ -228,6 +357,11 @@ export default function MobilePage() {
         setIsReceiving(false);
         setLatestReceivedFrame(null);
         setLatestAiResult(null);
+        const canvas = canvasRef.current;
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        }
     };
 
 
@@ -238,7 +372,7 @@ export default function MobilePage() {
 
             {/* Các element ẩn để xử lý video và canvas */}
             <video ref={videoRef} style={{ display: 'none' }} playsInline></video>
-            <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
+            <canvas ref={useRef<HTMLCanvasElement>(null)} style={{ display: 'none' }}></canvas>
 
             {/* Control Panel */}
             <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
@@ -246,7 +380,10 @@ export default function MobilePage() {
                 <p>Status: <span style={{ color: isConnected ? 'green' : 'red', fontWeight: 'bold' }}>
                     {isConnected ? 'Connected' : 'Disconnected'}
                 </span></p>
-
+                <div style={{ marginBottom: '10px' }}>
+                    <p style={{ margin: 0 }}>Streaming FPS: <strong>{streamingFps}</strong></p>
+                    <p style={{ margin: 0 }}>Receiving FPS: <strong>{receivingFps}</strong></p>
+                </div>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
                     {/* Streamer Controls */}
                     <button onClick={handleStartStream} disabled={!isConnected || isStreaming || isReceiving} style={{ padding: '10px', fontSize: '16px' }}>Start Streaming</button>
@@ -265,11 +402,10 @@ export default function MobilePage() {
             <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
                 <h2>Received Stream</h2>
                 <div style={{ minHeight: '240px', background: '#000', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                    {latestReceivedFrame ? (
-                        <img src={latestReceivedFrame} alt="Received Frame" style={{ maxWidth: '100%', maxHeight: '480px' }} />
-                    ) : (
-                        <p style={{ color: 'white' }}>Waiting for stream...</p>
-                    )}
+                     <canvas 
+                        ref={canvasRef} 
+                        style={{ maxWidth: '100%', maxHeight: '480px' }}
+                    />
                 </div>
             </div>
 
