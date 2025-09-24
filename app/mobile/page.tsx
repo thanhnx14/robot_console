@@ -26,6 +26,7 @@ const MessageType = {
 // Cấu hình cho stream
 const FPS = 24;
 const IMAGE_QUALITY = 0.7 ;
+const RENDER_FPS = 30; 
 
 // --- Helper function để chuyển đổi Hex sang URL ảnh ---
 const hexToImageUrl = (hexString: string): string => {
@@ -61,6 +62,8 @@ export default function MobilePage() {
     const frameInterval = 1000 / FPS;
     const isProcessingFrame = useRef<boolean>(false);
 
+    const latestPacketRef = useRef<any | null>(null);
+    const lastRenderedFrameIdRef = useRef<number>(-1);
     // === START: THÊM CODE ĐO FPS ===
     const [streamingFps, setStreamingFps] = useState(0);
     const [receivingFps, setReceivingFps] = useState(0);
@@ -129,11 +132,19 @@ export default function MobilePage() {
         sendCommand("viewer", "REQUEST_LATEST_PACKAGE");
     }, [sendCommand]);
 
-    // Thay thế toàn bộ useEffect hiện tại bằng đoạn code này
+    const getWebSocketUrl = (room: string, clientId: string): string => {
+        // Logic này không thay đổi, chỉ được chuyển vào đây
+        const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const host = typeof window !== 'undefined' ? window.location.host : '';
+
+        // Nếu host rỗng (ví dụ khi chạy ở Server-Side Rendering), trả về một chuỗi rỗng
+        if (!host) return '';
+
+        return `${protocol}://${host}/api/ws/${room}/${clientId}`;
+    };
 
     useEffect(() => {
-        // URL mới không cần 'role'
-        const wsUrl = `wss://thanhhome.name.vn/api/ws/${room}/${clientId}`;
+        const wsUrl = getWebSocketUrl(room, clientId);
 
         // Tạo một instance socket cục bộ trong effect
         const socket = new WebSocket(wsUrl);
@@ -167,48 +178,16 @@ export default function MobilePage() {
             const msgType = view.getUint8(0);
 
             if (msgType === MessageType.JSON_COMMAND) {
-                const jsonString = new TextDecoder().decode(data.slice(1));
-                const message = JSON.parse(jsonString);
-                if (message.image) {
-                    console.log("frame id:" + message.frameId);
+                 const message = JSON.parse(new TextDecoder().decode(data.slice(1)));
+                if (message.image && message.frameId) {
                     receivedFrameCount.current++;
- 
-                    // Lấy canvas và context để vẽ
-                    const canvas = canvasRef.current;
-                    if (!canvas) return;
-                    const ctx = canvas.getContext('2d');
-                    if (!ctx) return;
-
-                    // Chuyển đổi hex -> blob
-                    const bytes = new Uint8Array(message.image.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16)));
-                    const blob = new Blob([bytes], { type: 'image/jpeg' });
-
-                    // Tạo ImageBitmap để giải mã ảnh hiệu quả
-                    const imageBitmap = await createImageBitmap(blob);
-
-                     // Đảm bảo canvas có kích thước bằng với ảnh
-                    canvas.width = imageBitmap.width;
-                    canvas.height = imageBitmap.height;
-
-                    // Vẽ ảnh lên canvas
-                    ctx.drawImage(imageBitmap, 0, 0);
-                    // Giải phóng bộ nhớ
-                    imageBitmap.close();
-
-                    if (message.ai && message.ai.detections && Array.isArray(message.ai.detections)) {
-                         message.ai.detections.forEach((detection: Detection) => {
-                            drawSingleDetection(ctx, detection);
-                         });
-                        // setLatestAiResult(message.ai);
+                    latestPacketRef.current = message;
+                    if (isReceivingRef.current) {
+                        requestNextPackage(); // Yêu cầu gói tiếp theo
                     }
-                    // Sử dụng state isReceiving từ closure để kiểm tra
-                    // Điều này tránh đưa isReceiving vào dependency array
-                    if (isReceivingRef.current) { // Cần thêm một ref cho isReceiving
-                        requestNextPackage();
-                    }
-                    console.log("end" + message.frameId);
+                   
                 } else {
-                    setMessages(prev => [...prev, jsonString]);
+                    setMessages(prev => [...prev, JSON.stringify(message)]);
                 }
             }
         };
@@ -219,8 +198,58 @@ export default function MobilePage() {
         };
 
         // Chỉ tạo lại kết nối khi room hoặc clientId thay đổi
-    }, [room, clientId]); // <-- Rút gọn dependency array
+    }, [room, clientId, requestNextPackage]); // <-- Rút gọn dependency array
 
+
+    useEffect(() => {
+        let renderInterval: NodeJS.Timeout;
+
+        if (isReceiving) {
+            renderInterval = setInterval(async () => {
+                const latestPacket = latestPacketRef.current;
+                if (!latestPacket || latestPacket.frameId <= lastRenderedFrameIdRef.current) {
+                    return; // Bỏ qua nếu không có frame mới
+                }
+
+                const canvas = canvasRef.current;
+                const ctx = canvas?.getContext('2d');
+                if (!canvas || !ctx) return;
+
+                lastRenderedFrameIdRef.current = latestPacket.frameId; // Đánh dấu đã xử lý frame này
+
+                // --- Bắt đầu logic vẽ trực tiếp ---
+                try {
+                    const bytes = new Uint8Array(latestPacket.image.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16)));
+                    const imageBlob = new Blob([bytes], { type: 'image/jpeg' });
+
+                    // Vẽ ảnh lên canvas
+                    const imageBitmap = await createImageBitmap(imageBlob);
+                    canvas.width = imageBitmap.width;
+                    canvas.height = imageBitmap.height;
+                    ctx.drawImage(imageBitmap, 0, 0);
+                    imageBitmap.close();
+
+                    // Vẽ các detection
+                    if (latestPacket.ai?.detections) {
+                        latestPacket.ai.detections.forEach((detection: Detection) => {
+                            drawSingleDetection(ctx, detection);
+                        });
+                    }
+
+                } catch (error) {
+                    console.error("Lỗi khi render frame:", error);
+                }
+                // --- Kết thúc logic vẽ ---
+
+            }, 1000 / RENDER_FPS);
+        }
+
+        return () => {
+            if (renderInterval) clearInterval(renderInterval);
+            lastRenderedFrameIdRef.current = -1;
+            latestPacketRef.current = null;
+        };
+    }, [isReceiving, drawSingleDetection]);
     // Cần thêm một ref để theo dõi trạng thái isReceiving
     // mà không cần đưa vào dependency array của useEffect
     const isReceivingRef = useRef(isReceiving);
