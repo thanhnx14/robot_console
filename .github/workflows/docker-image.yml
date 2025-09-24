@@ -8,29 +8,13 @@ on:
     branches: [ "develop" ]
 
 jobs:
-
-  build:
+  build-and-deploy: # Đổi tên job cho rõ ràng hơn
 
     runs-on: self-hosted
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: |
-        docker build . --file Dockerfile --tag robot_console_dev_image:latest
-    - name: Stop and Remove Old Container
-      run: |
-        # Find the container ID (running or stopped)
-        $containerId = docker ps -aq --filter "name=robot_console"
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-        # Check if the variable is not empty
-        if ($containerId) {
-          Write-Output "Container 'robot_console' found. Stopping and removing it."
-          docker rm --force $containerId
-        } else {
-          Write-Output "Container 'robot_console' not found. Nothing to do."
-        }
-
-    - name: Run Docker Container
-      run: |
-        docker run -d --name robot_console --restart always -p 9080:8081 robot_console_dev_image:latest
+    - name: Build and Deploy with Docker Compose
+      run: docker-compose up -d --build

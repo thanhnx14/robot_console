@@ -20,11 +20,6 @@ let sequenceNumber = 0;
 let lastPackageTime = 0;
 let imageEventCount = 0; // Counter for "image" events
 
-// Function to log the number of "image" events per second
-setInterval(() => {
-  console.log(`Number of "image" events in the last second: ${imageEventCount}`);
-  // imageEventCount = 0; // Reset the counter
-}, 1000);
 
 const SocketHandler = (req: NextApiRequest, res: NextApiResponseWithSocket) => {
   if (res.socket.server.ioSend) {
