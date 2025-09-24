@@ -25,7 +25,7 @@ const MessageType = {
 
 // Cấu hình cho stream
 const FPS = 24;
-const IMAGE_QUALITY = 0.7;
+const IMAGE_QUALITY = 0.7 ;
 
 // --- Helper function để chuyển đổi Hex sang URL ảnh ---
 const hexToImageUrl = (hexString: string): string => {
@@ -133,7 +133,7 @@ export default function MobilePage() {
 
     useEffect(() => {
         // URL mới không cần 'role'
-        const wsUrl = `ws://thanhhome.duckdns.org:9081/ws/${room}/${clientId}`;
+        const wsUrl = `wss://thanhhome.name.vn/api/ws/${room}/${clientId}`;
 
         // Tạo một instance socket cục bộ trong effect
         const socket = new WebSocket(wsUrl);
