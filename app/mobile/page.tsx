@@ -442,9 +442,10 @@ export default function MobilePage() {
                 <p>Status: <span style={{ color: isConnected ? 'green' : 'red', fontWeight: 'bold' }}>
                     {isConnected ? 'Connected' : 'Disconnected'}
                 </span></p>
-                <div style={{ marginBottom: '10px' }}>
+                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '10px' }}>
                     <p style={{ margin: 0 }}>Streaming FPS: <strong>{streamingFps}</strong></p>
                     <p style={{ margin: 0 }}>Receiving FPS: <strong>{receivingFps}</strong></p>
+                    <p style={{ margin: 0 }}>Target FPS: <strong>{targetFps}</strong></p>
                 </div>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
                     {/* Streamer Controls */}
