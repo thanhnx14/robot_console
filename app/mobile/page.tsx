@@ -26,7 +26,9 @@ const MessageType = {
 // Cấu hình cho stream
 const FPS = 24;
 const IMAGE_QUALITY = 0.7 ;
-const RENDER_FPS = 30; 
+const RENDER_FPS = 30;
+const INITIAL_TARGET_FPS = 25;
+const FEEDBACK_INTERVAL_MS = 2000;
 
 // --- Helper function để chuyển đổi Hex sang URL ảnh ---
 const hexToImageUrl = (hexString: string): string => {
@@ -43,6 +45,7 @@ export default function MobilePage() {
     // Tách biệt trạng thái cho 2 vai trò
     const [isStreaming, setIsStreaming] = useState<boolean>(false);
     const [isReceiving, setIsReceiving] = useState<boolean>(false);
+    const [targetFps, setTargetFps] = useState<number>(INITIAL_TARGET_FPS);
 
     // State để hiển thị dữ liệu nhận được
     const [latestReceivedFrame, setLatestReceivedFrame] = useState<string | null>(null);
@@ -64,6 +67,7 @@ export default function MobilePage() {
 
     const latestPacketRef = useRef<any | null>(null);
     const lastRenderedFrameIdRef = useRef<number>(-1);
+    const processingTimesRef = useRef<number[]>([]);
     // === START: THÊM CODE ĐO FPS ===
     const [streamingFps, setStreamingFps] = useState(0);
     const [receivingFps, setReceivingFps] = useState(0);
@@ -145,7 +149,6 @@ export default function MobilePage() {
 
     useEffect(() => {
         const wsUrl = getWebSocketUrl(room, clientId);
-
         // Tạo một instance socket cục bộ trong effect
         const socket = new WebSocket(wsUrl);
         socket.binaryType = 'arraybuffer';
@@ -182,9 +185,6 @@ export default function MobilePage() {
                 if (message.image && message.frameId) {
                     receivedFrameCount.current++;
                     latestPacketRef.current = message;
-                    if (isReceivingRef.current) {
-                        requestNextPackage(); // Yêu cầu gói tiếp theo
-                    }
                    
                 } else {
                     setMessages(prev => [...prev, JSON.stringify(message)]);
@@ -198,7 +198,7 @@ export default function MobilePage() {
         };
 
         // Chỉ tạo lại kết nối khi room hoặc clientId thay đổi
-    }, [room, clientId, requestNextPackage]); // <-- Rút gọn dependency array
+    }, []); // <-- Rút gọn dependency array
 
 
     useEffect(() => {
@@ -210,7 +210,7 @@ export default function MobilePage() {
                 if (!latestPacket || latestPacket.frameId <= lastRenderedFrameIdRef.current) {
                     return; // Bỏ qua nếu không có frame mới
                 }
-
+                const startTime = performance.now();
                 const canvas = canvasRef.current;
                 const ctx = canvas?.getContext('2d');
                 if (!canvas || !ctx) return;
@@ -239,7 +239,9 @@ export default function MobilePage() {
                 } catch (error) {
                     console.error("Lỗi khi render frame:", error);
                 }
-                // --- Kết thúc logic vẽ ---
+                // --- Kết thúc logic vẽ ---    
+                const endTime = performance.now(); // <<-- Kết thúc đo
+                processingTimesRef.current.push(endTime - startTime); 
 
             }, 1000 / RENDER_FPS);
         }
@@ -257,6 +259,38 @@ export default function MobilePage() {
         isReceivingRef.current = isReceiving;
     }, [isReceiving]);
 
+    useEffect(() => {
+        let feedbackInterval: NodeJS.Timeout;
+        if (isReceiving) {
+            feedbackInterval = setInterval(() => {
+                const times = processingTimesRef.current;
+                if (times.length < 10) return; // Đợi có đủ mẫu để quyết định
+
+                // 1. Tính toán hiệu năng
+                const avgProcessingTime = times.reduce((a, b) => a + b, 0) / times.length;
+                processingTimesRef.current = []; // Reset lại để thu thập mẫu mới
+
+                // 2. Logic quyết định FPS mới
+                const renderInterval = 1000 / RENDER_FPS;
+                let newTargetFps = targetFps;
+
+                if (avgProcessingTime > renderInterval * 0.8) { // Nếu xử lý quá 80% thời gian cho phép -> Quá tải
+                    newTargetFps = Math.max(10, targetFps - 5); // Giảm 5 FPS
+                } else if (avgProcessingTime < renderInterval * 0.3) { // Nếu xử lý dưới 30% -> Rất rảnh
+                    newTargetFps = Math.min(30, targetFps + 3); // Tăng 3 FPS
+                }
+
+                // 3. Gửi yêu cầu lên server NẾU có sự thay đổi
+                if (newTargetFps !== targetFps) {
+                    console.log(`Hiệu năng thay đổi: Thời gian xử lý trung bình ${avgProcessingTime.toFixed(2)}ms. Đổi FPS từ ${targetFps} -> ${newTargetFps}`);
+                    setTargetFps(newTargetFps);
+                    sendCommand('viewer', 'ADJUST_FPS', { fps: newTargetFps });
+                }
+            }, FEEDBACK_INTERVAL_MS);
+        }
+
+        return () => { if (feedbackInterval) clearInterval(feedbackInterval); };
+    }, [isReceiving, targetFps, sendCommand]);
     // --- LOGIC GỬI ẢNH (STREAMER) ---
     const sendFrame = useCallback(async () => {
         if (!videoRef.current || !canvasRef.current || ws.current?.readyState !== WebSocket.OPEN){
@@ -377,8 +411,7 @@ export default function MobilePage() {
     const handleStartReceiving = () => {
         sendCommand("viewer", "START_RECEIVING");
         setIsReceiving(true);
-        // Bắt đầu chuỗi long-polling
-        requestNextPackage();
+        setTargetFps(INITIAL_TARGET_FPS);
     };
 
     const handleStopReceiving = () => {
