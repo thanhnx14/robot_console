@@ -427,11 +427,11 @@ export default function MobilePage() {
     };
 
     const handleEsp32StartStream = () => {
-        sendCommand("controlable", "start_stream");
+        sendCommand("controller", "start_stream");
     };
 
     const handleEsp32StopStream = () => {
-        sendCommand("controlable", "stop_stream");
+        sendCommand("controller", "stop_stream");
     };
 
     const handleWakeUpRobot = async () => {
