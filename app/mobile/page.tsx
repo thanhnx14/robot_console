@@ -53,7 +53,7 @@ export default function MobilePage() {
 
     // State và Ref cho kết nối
     const [room] = useState<string>('video_stream_room');
-    const [clientId] = useState<string>(`mobile_${Date.now()}`);
+    const [clientId] = useState<string>('web_dashboard_1');
     const ws = useRef<WebSocket | null>(null);
 
     // Refs cho video, canvas và vòng lặp
@@ -426,6 +426,31 @@ export default function MobilePage() {
         }
     };
 
+    const handleEsp32StartStream = () => {
+        sendCommand("controlable", "start_stream");
+    };
+
+    const handleEsp32StopStream = () => {
+        sendCommand("controlable", "stop_stream");
+    };
+
+    const handleWakeUpRobot = async () => {
+        try {
+            // Xây dựng URL đến server WebSocket backend
+            const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'https' : 'http';
+            const host = typeof window !== 'undefined' ? window.location.host : '';
+            const apiUrl = `${protocol}://${host}/api/control/ble-wake`;
+            
+            const response = await fetch(apiUrl);
+            const data = await response.json();
+            console.log("Wake up robot response:", data);
+            setMessages(prev => [...prev, `Wake Up Robot: ${JSON.stringify(data)}`]);
+        } catch (error) {
+            console.error("Lỗi khi wake up robot:", error);
+            setMessages(prev => [...prev, `Lỗi Wake Up Robot: ${error}`]);
+        }
+    };
+
 
     // --- GIAO DIỆN (RENDER) ---
     return (
@@ -455,6 +480,13 @@ export default function MobilePage() {
                     {/* Viewer Controls */}
                     <button onClick={handleStartReceiving} disabled={!isConnected || isStreaming || isReceiving} style={{ padding: '10px', fontSize: '16px' }}>Start Receiving</button>
                     <button onClick={handleStopReceiving} disabled={!isReceiving} style={{ padding: '10px', fontSize: '16px' }}>Stop Receiving</button>
+
+                    {/* ESP32 Controls */}
+                    <button onClick={handleEsp32StartStream} disabled={!isConnected} style={{ padding: '10px', fontSize: '16px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>ESP32 Start Stream</button>
+                    <button onClick={handleEsp32StopStream} disabled={!isConnected} style={{ padding: '10px', fontSize: '16px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>ESP32 Stop Stream</button>
+
+                    {/* Robot Controls */}
+                    <button onClick={handleWakeUpRobot} disabled={!isConnected} style={{ padding: '10px', fontSize: '16px', backgroundColor: '#FF9800', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>Wake Up Robot</button>
                 </div>
 
                 {isStreaming && <p style={{ color: 'blue', margin: 0 }}><strong>Mode:</strong> STREAMING...</p>}
