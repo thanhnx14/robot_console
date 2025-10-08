@@ -2,6 +2,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { JoystickManager, JoystickManagerOptions } from 'nipplejs';
+import throttle from 'lodash/throttle';
 
 type Detection = {
     box: {
@@ -55,6 +57,11 @@ export default function MobilePage() {
     const [room] = useState<string>('video_stream_room');
     const [clientId] = useState<string>('web_dashboard_1');
     const ws = useRef<WebSocket | null>(null);
+
+    // Joystick state và refs
+    const [joystickData, setJoystickData] = useState({ x: 0, y: 0 });
+    const joystickRef = useRef<HTMLDivElement | null>(null);
+    const joystickInstance = useRef<JoystickManager | null>(null);
 
     // Refs cho video, canvas và vòng lặp
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -136,15 +143,28 @@ export default function MobilePage() {
         sendCommand("viewer", "REQUEST_LATEST_PACKAGE");
     }, [sendCommand]);
 
+    // Hàm gửi lệnh điều khiển joystick (throttled)
+    const sendJoystickCommand = useRef(
+        throttle((x: number, y: number) => {
+            if (ws.current?.readyState === WebSocket.OPEN) {
+                sendCommand("controller", "MOVE_JOYSTICK", { x, y });
+            }
+        }, 100, { trailing: true })
+    ).current;
+
     const getWebSocketUrl = (room: string, clientId: string): string => {
-        // Logic này không thay đổi, chỉ được chuyển vào đây
         const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
         const host = typeof window !== 'undefined' ? window.location.host : '';
-
-        // Nếu host rỗng (ví dụ khi chạy ở Server-Side Rendering), trả về một chuỗi rỗng
         if (!host) return '';
-
-        return `${protocol}://${host}/api/ws/${room}/${clientId}`;
+        
+        // Nếu dùng ws (không phải wss), thay đổi cổng thành 9081
+        let finalHost = host;
+        if (protocol === 'ws') {
+            const hostname = host.split(':')[0];
+            finalHost = `${hostname}:9081`;
+        }
+        
+        return `${protocol}://${finalHost}/api/ws/${room}/${clientId}`;
     };
 
     useEffect(() => {
@@ -451,65 +471,280 @@ export default function MobilePage() {
         }
     };
 
+    // Setup Joystick
+    useEffect(() => {
+        const setupJoystick = async () => {
+            if (typeof window !== 'undefined' && joystickRef.current && !joystickInstance.current) {
+                const { default: nipplejs } = await import('nipplejs');
+
+                const options: JoystickManagerOptions = {
+                    zone: joystickRef.current,
+                    mode: 'static',
+                    position: { left: '50%', top: '50%' },
+                    color: '#3B82F6',
+                    size: 120,
+                    restJoystick: true,
+                };
+
+                const joystick: JoystickManager = nipplejs.create(options);
+                joystickInstance.current = joystick;
+
+                // Xử lý sự kiện move
+                joystick.on('move', (evt, data) => {
+                    // Chuyển đổi từ vector (-1 to 1) sang range (-100 to 100)
+                    const x = Math.round(data.vector.x * 100);
+                    const y = Math.round(data.vector.y * 100);
+                    
+                    setJoystickData({ x, y });
+                    sendJoystickCommand(x, y);
+                });
+
+                // Xử lý sự kiện end (thả joystick)
+                joystick.on('end', () => {
+                    setJoystickData({ x: 0, y: 0 });
+                    sendJoystickCommand(0, 0);
+                });
+            }
+        };
+
+        setupJoystick();
+
+        return () => {
+            if (joystickInstance.current) {
+                joystickInstance.current.destroy();
+                joystickInstance.current = null;
+            }
+        };
+    }, [sendJoystickCommand]);
+
 
     // --- GIAO DIỆN (RENDER) ---
     return (
-        <main style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '800px', margin: 'auto' }}>
-            <h1>Video Stream & Control</h1>
-
+        <main style={{ 
+            padding: '0', 
+            fontFamily: 'sans-serif', 
+            minHeight: '100vh',
+            background: '#1a1a1a',
+            display: 'flex',
+            flexDirection: 'column'
+        }}>
             {/* Các element ẩn để xử lý video và canvas */}
             <video ref={videoRef} style={{ display: 'none' }} playsInline></video>
             <canvas ref={useRef<HTMLCanvasElement>(null)} style={{ display: 'none' }}></canvas>
 
-            {/* Control Panel */}
-            <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
-                <h2>Controls</h2>
-                <p>Status: <span style={{ color: isConnected ? 'green' : 'red', fontWeight: 'bold' }}>
-                    {isConnected ? 'Connected' : 'Disconnected'}
-                </span></p>
-                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                    <p style={{ margin: 0 }}>Streaming FPS: <strong>{streamingFps}</strong></p>
-                    <p style={{ margin: 0 }}>Receiving FPS: <strong>{receivingFps}</strong></p>
-                    <p style={{ margin: 0 }}>Target FPS: <strong>{targetFps}</strong></p>
+            {/* Header - Status Bar */}
+            <div style={{ 
+                background: '#2d2d2d', 
+                padding: '10px 15px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                borderBottom: '2px solid #3B82F6'
+            }}>
+                <div>
+                    <h1 style={{ margin: 0, fontSize: '18px', color: '#fff' }}>🤖 Robot Control</h1>
                 </div>
-                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                    {/* Streamer Controls */}
-                    <button onClick={handleStartStream} disabled={!isConnected || isStreaming || isReceiving} style={{ padding: '10px', fontSize: '16px' }}>Start Streaming</button>
-                    <button onClick={handleStopStream} disabled={!isStreaming} style={{ padding: '10px', fontSize: '16px' }}>Stop Streaming</button>
-
-                    {/* Viewer Controls */}
-                    <button onClick={handleStartReceiving} disabled={!isConnected || isStreaming || isReceiving} style={{ padding: '10px', fontSize: '16px' }}>Start Receiving</button>
-                    <button onClick={handleStopReceiving} disabled={!isReceiving} style={{ padding: '10px', fontSize: '16px' }}>Stop Receiving</button>
-
-                    {/* ESP32 Controls */}
-                    <button onClick={handleEsp32StartStream} disabled={!isConnected} style={{ padding: '10px', fontSize: '16px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>ESP32 Start Stream</button>
-                    <button onClick={handleEsp32StopStream} disabled={!isConnected} style={{ padding: '10px', fontSize: '16px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>ESP32 Stop Stream</button>
-
-                    {/* Robot Controls */}
-                    <button onClick={handleWakeUpRobot} disabled={!isConnected} style={{ padding: '10px', fontSize: '16px', backgroundColor: '#FF9800', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>Wake Up Robot</button>
-                </div>
-
-                {isStreaming && <p style={{ color: 'blue', margin: 0 }}><strong>Mode:</strong> STREAMING...</p>}
-                {isReceiving && <p style={{ color: 'purple', margin: 0 }}><strong>Mode:</strong> RECEIVING...</p>}
-            </div>
-
-            {/* Received Stream Display */}
-            <div style={{ marginBottom: '20px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
-                <h2>Received Stream</h2>
-                <div style={{ minHeight: '240px', background: '#000', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                     <canvas 
-                        ref={canvasRef} 
-                        style={{ maxWidth: '100%', maxHeight: '480px' }}
-                    />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                    <div style={{ 
+                        width: '10px', 
+                        height: '10px', 
+                        borderRadius: '50%', 
+                        background: isConnected ? '#10b981' : '#ef4444',
+                        boxShadow: isConnected ? '0 0 10px #10b981' : 'none'
+                    }}></div>
+                    <span style={{ fontSize: '12px', color: '#999' }}>FPS: {receivingFps}</span>
                 </div>
             </div>
 
-            {/* AI Result Display */}
-            <div style={{ padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
-                <h2>AI Result</h2>
-                <pre style={{ background: '#f0f0f0', padding: '10px', borderRadius: '5px', minHeight: '50px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {latestAiResult ? JSON.stringify(latestAiResult, null, 2) : 'No AI data.'}
-                </pre>
+            {/* Video Stream Display */}
+            <div style={{ 
+                flex: '0 0 auto',
+                background: '#000', 
+                display: 'flex', 
+                justifyContent: 'center', 
+                alignItems: 'center',
+                minHeight: '200px',
+                maxHeight: '40vh'
+            }}>
+                <canvas 
+                    ref={canvasRef} 
+                    style={{ 
+                        width: '100%', 
+                        height: 'auto',
+                        maxHeight: '40vh',
+                        objectFit: 'contain'
+                    }}
+                />
+                {!isReceiving && (
+                    <div style={{ 
+                        position: 'absolute', 
+                        color: '#666', 
+                        fontSize: '14px',
+                        textAlign: 'center'
+                    }}>
+                        📹 Waiting for video stream...
+                    </div>
+                )}
+            </div>
+
+            {/* Joystick Control Section */}
+            <div style={{ 
+                flex: '1 1 auto',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                padding: '20px',
+                background: 'linear-gradient(180deg, #1a1a1a 0%, #2d2d2d 100%)'
+            }}>
+                <div style={{ 
+                    marginBottom: '15px',
+                    fontSize: '14px',
+                    color: '#999',
+                    textAlign: 'center'
+                }}>
+                    🕹️ Điều khiển Robot
+                </div>
+                
+                {/* Joystick Container */}
+                <div
+                    ref={joystickRef}
+                    style={{ 
+                        width: '180px', 
+                        height: '180px', 
+                        background: 'radial-gradient(circle, #3d3d3d 0%, #2d2d2d 100%)',
+                        borderRadius: '50%',
+                        position: 'relative',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.5), inset 0 2px 10px rgba(255,255,255,0.1)',
+                        border: '3px solid #3B82F6'
+                    }}
+                ></div>
+
+                {/* Joystick Data Display */}
+                <div style={{ 
+                    marginTop: '20px',
+                    fontSize: '16px', 
+                    fontWeight: 'bold',
+                    padding: '10px 20px',
+                    background: 'rgba(59, 130, 246, 0.1)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                    color: '#3B82F6',
+                    fontFamily: 'monospace'
+                }}>
+                    X: {joystickData.x.toString().padStart(4, ' ')} | Y: {joystickData.y.toString().padStart(4, ' ')}
+                </div>
+            </div>
+
+            {/* Bottom Control Buttons */}
+            <div style={{ 
+                flex: '0 0 auto',
+                background: '#2d2d2d', 
+                padding: '15px',
+                borderTop: '1px solid #444'
+            }}>
+                <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: '10px',
+                    marginBottom: '10px'
+                }}>
+                    <button 
+                        onClick={handleStartReceiving} 
+                        disabled={!isConnected || isStreaming || isReceiving}
+                        style={{
+                            padding: '12px',
+                            fontSize: '14px',
+                            background: isReceiving ? '#666' : '#10b981',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: isConnected && !isStreaming && !isReceiving ? 'pointer' : 'not-allowed',
+                            fontWeight: '600',
+                            opacity: !isConnected || isStreaming || isReceiving ? 0.5 : 1
+                        }}
+                    >
+                        ▶️ Start View
+                    </button>
+                    <button 
+                        onClick={handleStopReceiving} 
+                        disabled={!isReceiving}
+                        style={{
+                            padding: '12px',
+                            fontSize: '14px',
+                            background: '#ef4444',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: isReceiving ? 'pointer' : 'not-allowed',
+                            fontWeight: '600',
+                            opacity: !isReceiving ? 0.5 : 1
+                        }}
+                    >
+                        ⏹️ Stop View
+                    </button>
+                </div>
+
+                <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: '10px'
+                }}>
+                    <button 
+                        onClick={handleEsp32StartStream} 
+                        disabled={!isConnected}
+                        style={{
+                            padding: '12px',
+                            fontSize: '14px',
+                            background: '#3B82F6',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: isConnected ? 'pointer' : 'not-allowed',
+                            fontWeight: '600',
+                            opacity: !isConnected ? 0.5 : 1
+                        }}
+                    >
+                        📹 ESP32 Start
+                    </button>
+                    <button 
+                        onClick={handleEsp32StopStream} 
+                        disabled={!isConnected}
+                        style={{
+                            padding: '12px',
+                            fontSize: '14px',
+                            background: '#f59e0b',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: isConnected ? 'pointer' : 'not-allowed',
+                            fontWeight: '600',
+                            opacity: !isConnected ? 0.5 : 1
+                        }}
+                    >
+                        🔴 ESP32 Stop
+                    </button>
+                </div>
+
+                <button 
+                    onClick={handleWakeUpRobot} 
+                    disabled={!isConnected}
+                    style={{
+                        width: '100%',
+                        marginTop: '10px',
+                        padding: '12px',
+                        fontSize: '14px',
+                        background: '#8b5cf6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: isConnected ? 'pointer' : 'not-allowed',
+                        fontWeight: '600',
+                        opacity: !isConnected ? 0.5 : 1
+                    }}
+                >
+                    ⚡ Wake Up Robot
+                </button>
             </div>
         </main>
     );
