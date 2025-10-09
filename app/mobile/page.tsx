@@ -147,9 +147,25 @@ export default function MobilePage() {
     const sendJoystickCommand = useRef(
         throttle((x: number, y: number) => {
             if (ws.current?.readyState === WebSocket.OPEN) {
-                sendCommand("controller", "MOVE_JOYSTICK", { x, y });
+                const message = { channel: "controller", command: "MOVE_JOYSTICK", payload: { x, y } };
+                const jsonString = JSON.stringify(message);
+                const jsonBuffer = new TextEncoder().encode(jsonString);
+
+                const buffer = new Uint8Array(1 + jsonBuffer.length);
+                buffer[0] = MessageType.JSON_COMMAND;
+                buffer.set(jsonBuffer, 1);
+
+                ws.current.send(buffer);
+                // console.log("Sent joystick command:", message);
             }
         }, 100, { trailing: true })
+    ).current;
+
+    // Throttle update UI joystick data (tránh re-render quá nhiều)
+    const updateJoystickDisplay = useRef(
+        throttle((x: number, y: number) => {
+            setJoystickData({ x, y });
+        }, 200) // Update UI mỗi 200ms thay vì liên tục
     ).current;
 
     const getWebSocketUrl = (room: string, clientId: string): string => {
@@ -248,7 +264,6 @@ export default function MobilePage() {
                     canvas.height = imageBitmap.height;
                     ctx.drawImage(imageBitmap, 0, 0);
                     imageBitmap.close();
-
                     // Vẽ các detection
                     if (latestPacket.ai?.detections) {
                         latestPacket.ai.detections.forEach((detection: Detection) => {
@@ -495,8 +510,11 @@ export default function MobilePage() {
                     const x = Math.round(data.vector.x * 100);
                     const y = Math.round(data.vector.y * 100);
                     
-                    setJoystickData({ x, y });
+                    // Gửi lệnh điều khiển (100ms throttle)
                     sendJoystickCommand(x, y);
+                    
+                    // Cập nhật UI (200ms throttle - tránh re-render quá nhiều)
+                    updateJoystickDisplay(x, y);
                 });
 
                 // Xử lý sự kiện end (thả joystick)
@@ -515,7 +533,7 @@ export default function MobilePage() {
                 joystickInstance.current = null;
             }
         };
-    }, [sendJoystickCommand]);
+    }, [sendJoystickCommand, updateJoystickDisplay]);
 
 
     // --- GIAO DIỆN (RENDER) ---
@@ -528,10 +546,7 @@ export default function MobilePage() {
             display: 'flex',
             flexDirection: 'column'
         }}>
-            {/* Các element ẩn để xử lý video và canvas */}
             <video ref={videoRef} style={{ display: 'none' }} playsInline></video>
-            <canvas ref={useRef<HTMLCanvasElement>(null)} style={{ display: 'none' }}></canvas>
-
             {/* Header - Status Bar */}
             <div style={{ 
                 background: '#2d2d2d', 
