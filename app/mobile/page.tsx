@@ -43,6 +43,7 @@ const hexToImageUrl = (hexString: string): string => {
 export default function MobilePage() {
     const [isConnected, setIsConnected] = useState<boolean>(false);
     const [messages, setMessages] = useState<string[]>([]);
+    const [notification, setNotification] = useState<string | null>(null);
 
     // Tách biệt trạng thái cho 2 vai trò
     const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -478,11 +479,21 @@ export default function MobilePage() {
             
             const response = await fetch(apiUrl);
             const data = await response.json();
-            console.log("Wake up robot response:", data);
-            setMessages(prev => [...prev, `Wake Up Robot: ${JSON.stringify(data)}`]);
-        } catch (error) {
+            console.log("Wake up robot response:", data);            
+            if (data.status === 'success' && data.upstream_response?.message) {
+                setNotification(data.upstream_response.message);
+                setTimeout(() => setNotification(null), 3000); // Tự động ẩn sau 3 giây
+            } else {
+                const errorMessage = data.message || "Có lỗi xảy ra khi đánh thức robot.";
+                setNotification(`Lỗi: ${errorMessage}`);
+                setTimeout(() => setNotification(null), 4000);
+            }
+            setMessages(prev => [...prev, `Wake Up: ${JSON.stringify(data)}`]);
+        } catch (error: any) {
             console.error("Lỗi khi wake up robot:", error);
-            setMessages(prev => [...prev, `Lỗi Wake Up Robot: ${error}`]);
+            setNotification(`Lỗi mạng: ${error.message || 'Không thể kết nối'}`);
+            setTimeout(() => setNotification(null), 4000);
+            setMessages(prev => [...prev, `Lỗi Wake Up: ${error}`]);
         }
     };
 
@@ -546,6 +557,25 @@ export default function MobilePage() {
             display: 'flex',
             flexDirection: 'column'
         }}>
+            {notification && (
+                <div style={{
+                    position: 'fixed',
+                    top: '20px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    padding: '12px 20px',
+                    background: 'rgba(0, 0, 0, 0.8)',
+                    color: 'white',
+                    borderRadius: '8px',
+                    zIndex: 1000,
+                    fontSize: '14px',
+                    textAlign: 'center',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                    animation: 'fadeInOut 3s forwards'
+                }}>
+                    {notification}
+                </div>
+            )}
             <video ref={videoRef} style={{ display: 'none' }} playsInline></video>
             {/* Header - Status Bar */}
             <div style={{ 
