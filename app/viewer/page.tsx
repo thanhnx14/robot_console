@@ -253,74 +253,84 @@ export default function ViewerPage() {
 
     return (
         <main style={{ 
-            padding: '0', 
+            padding: '20px', 
             fontFamily: 'sans-serif', 
             minHeight: '100vh',
             background: '#1a1a1a',
             display: 'flex',
-            flexDirection: 'column'
+            justifyContent: 'center',
+            alignItems: 'center'
         }}>
-            {/* Header */}
-            <div style={{ 
-                background: '#2d2d2d', 
-                padding: '15px 20px',
+            <div style={{
+                width: '100%',
+                maxWidth: '900px', // Giới hạn chiều rộng tối đa trên PC
+                background: '#2d2d2d',
+                borderRadius: '12px',
+                overflow: 'hidden',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
                 display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                borderBottom: '2px solid #3B82F6'
+                flexDirection: 'column'
             }}>
-                <div>
-                    <h1 style={{ margin: 0, fontSize: '20px', color: '#fff' }}>📹 Video Viewer</h1>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                    <div style={{ 
-                        width: '12px', 
-                        height: '12px', 
-                        borderRadius: '50%', 
-                        background: isConnected ? '#10b981' : '#ef4444',
-                        boxShadow: isConnected ? '0 0 10px #10b981' : 'none'
-                    }}></div>
-                    <span style={{ fontSize: '14px', color: '#999' }}>
-                        {isConnected ? 'Đã kết nối' : 'Chưa kết nối'}
-                    </span>
-                    <span style={{ fontSize: '14px', color: '#3B82F6', fontWeight: 'bold' }}>
-                        {receivingFps} FPS
-                    </span>
-                </div>
-            </div>
-
-            {/* Video Display */}
-            <div style={{ 
-                flex: 1,
-                background: '#000', 
-                display: 'flex', 
-                justifyContent: 'center', 
-                alignItems: 'center',
-                position: 'relative'
-            }}>
-                <canvas 
-                    ref={canvasRef} 
-                    style={{ 
-                        width: '100%', 
-                        height: '100%',
-                        objectFit: 'contain'
-                    }}
-                />
-                {!isReceiving && (
-                    <div style={{ 
-                        position: 'absolute', 
-                        color: '#666', 
-                        fontSize: '16px',
-                        textAlign: 'center'
-                    }}>
-                        <div style={{ marginBottom: '10px', fontSize: '60px' }}>📹</div>
-                        <div>
-                            {isConnected ? 'Đang chờ video stream...' : 'Đang kết nối...'}
-                        </div>
+                {/* Header */}
+                <div style={{ 
+                    padding: '15px 20px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    borderBottom: '1px solid #444'
+                }}>
+                    <div>
+                        <h1 style={{ margin: 0, fontSize: '20px', color: '#fff' }}>📹 Video Viewer</h1>
                     </div>
-                )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div style={{ 
+                            width: '12px', 
+                            height: '12px', 
+                            borderRadius: '50%', 
+                            background: isConnected ? '#10b981' : '#ef4444',
+                            boxShadow: isConnected ? '0 0 10px #10b981' : 'none'
+                        }}></div>
+                        <span style={{ fontSize: '14px', color: '#999' }}>
+                            {isConnected ? 'Đã kết nối' : 'Chưa kết nối'}
+                        </span>
+                        <span style={{ fontSize: '14px', color: '#3B82F6', fontWeight: 'bold' }}>
+                            {receivingFps} FPS
+                        </span>
+                    </div>
+                </div>
+
+                {/* Video Display */}
+                <div style={{ 
+                    background: '#000', 
+                    display: 'flex', 
+                    justifyContent: 'center', 
+                    alignItems: 'center',
+                    position: 'relative',
+                    aspectRatio: '16 / 9' // Giữ tỷ lệ khung hình 16:9
+                }}>
+                    <canvas 
+                        ref={canvasRef} 
+                        style={{ 
+                            maxWidth: '100%', 
+                            maxHeight: '100%',
+                            objectFit: 'contain'
+                        }}
+                    />
+                    {!isReceiving && (
+                        <div style={{ 
+                            position: 'absolute', 
+                            color: '#666', 
+                            fontSize: '16px',
+                            textAlign: 'center'
+                        }}>
+                            <div style={{ marginBottom: '10px', fontSize: '60px' }}>📹</div>
+                            <div>
+                                {isConnected ? 'Đang chờ video stream...' : 'Đang kết nối...'}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
         </main>
     );
 }
-
